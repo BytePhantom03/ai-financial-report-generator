@@ -2,8 +2,12 @@ fastapi
 uvicorn
 python-multipart
 pypdf
+pdfplumber
 reportlab
 matplotlib
+numpy
 pydantic
 openai
+google-generativeai
+groq
 python-dotenv
