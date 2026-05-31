@@ -335,15 +335,40 @@ def _smart_extract(company_name: str, text: str) -> GeojitReportData:
 # ─────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────
-def parse_financial_document(company_name: str, document_text: str) -> GeojitReportData:
+def parse_financial_document(
+    company_name: str,
+    document_text: str,
+    filename: str = "",
+    file_bytes: bytes = b"",
+) -> GeojitReportData:
     """
     Extract structured financial data.
-    Tries OpenAI → DeepSeek → Smart Rule-based engine.
+    Cascade: Gemini 2.0 Flash → Groq Llama 3.1 → OpenAI → Rule-based.
+    Gemini is tried first if file_bytes are provided (supports native PDF vision).
     """
+    from config import GEMINI_API_KEY, GROQ_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY
+
+    # 1. Gemini (multimodal — reads PDFs including image-embedded tables)
+    if file_bytes and GEMINI_API_KEY:
+        try:
+            from gemini_extractor import extract_with_gemini
+            return extract_with_gemini(company_name, filename or "document.pdf", file_bytes)
+        except Exception as e:
+            print(f"Gemini failed: {e}")
+
+    # 2. Groq Llama 3.1 (fast text-only)
+    if GROQ_API_KEY:
+        try:
+            from groq_extractor import extract_with_groq
+            return extract_with_groq(company_name, document_text)
+        except Exception as e:
+            print(f"Groq failed: {e}")
+
+    # 3. OpenAI / DeepSeek (legacy)
     if OPENAI_AVAILABLE:
         for provider, key, base_url, model in [
-            ("OpenAI",   os.environ.get("OPENAI_API_KEY",""),   None,                       "gpt-4o-mini"),
-            ("DeepSeek", os.environ.get("DEEPSEEK_API_KEY",""), "https://api.deepseek.com/v1", "deepseek-chat"),
+            ("OpenAI",   OPENAI_API_KEY,   None,                          "gpt-4o-mini"),
+            ("DeepSeek", DEEPSEEK_API_KEY, "https://api.deepseek.com/v1", "deepseek-chat"),
         ]:
             if not key:
                 continue
@@ -352,17 +377,16 @@ def parse_financial_document(company_name: str, document_text: str) -> GeojitRep
                 if base_url:
                     kwargs["base_url"] = base_url
                 client = OpenAI(**kwargs)
-
                 if provider == "OpenAI":
                     resp = client.beta.chat.completions.parse(
                         model=model,
                         messages=[
-                            {"role": "system", "content": "Expert financial analyst. Extract structured data precisely."},
+                            {"role": "system", "content": "Expert financial analyst."},
                             {"role": "user",   "content": _build_prompt(company_name, document_text)},
                         ],
                         response_format=GeojitReportData,
                     )
-                    print(f"SUCCESS: Used {provider} for extraction.")
+                    print(f"SUCCESS: Used {provider}.")
                     return resp.choices[0].message.parsed
                 else:
                     resp = client.chat.completions.create(
@@ -374,11 +398,12 @@ def parse_financial_document(company_name: str, document_text: str) -> GeojitRep
                         response_format={"type": "json_object"},
                     )
                     data = json.loads(resp.choices[0].message.content)
-                    print(f"SUCCESS: Used {provider} for extraction.")
+                    print(f"SUCCESS: Used {provider}.")
                     return GeojitReportData(**data)
             except Exception as e:
                 print(f"{provider} failed: {e}")
 
+    # 4. Rule-based fallback (no API key required)
     print("INFO: Using smart rule-based extraction engine.")
     return _smart_extract(company_name, document_text)
 
