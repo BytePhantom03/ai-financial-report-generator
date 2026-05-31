@@ -1,0 +1,16 @@
+{
+  "name": "Bull AI — Financial Research Report Generator",
+  "short_name": "Bull AI",
+  "description": "AI-powered Geojit-style equity research report generator",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f4f8",
+  "theme_color": "#004B87",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

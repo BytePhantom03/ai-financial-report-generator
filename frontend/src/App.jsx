@@ -1,25 +1,39 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 
 const API_BASE = 'http://localhost:8000/api';
 
 const STEPS = [
-  { id: 'PENDING', label: 'Queued', icon: '⏳' },
-  { id: 'EXTRACTING_TEXT', label: 'Extracting Text from Document', icon: '📄' },
-  { id: 'ANALYZING_WITH_LLM', label: 'AI Analyzing Financials', icon: '🤖' },
-  { id: 'COMPILING_PDF', label: 'Rendering Geojit PDF', icon: '📊' },
-  { id: 'COMPLETED', label: 'Report Ready!', icon: '✅' },
+  { id: 'PENDING',          label: 'Queued',                       icon: '⏳', desc: 'Job submitted...' },
+  { id: 'EXTRACTING_TEXT',  label: 'Reading Document',             icon: '📄', desc: 'Parsing PDF / CSV / TXT...' },
+  { id: 'ANALYZING_WITH_LLM', label: 'AI Extracting Financials',  icon: '🤖', desc: 'Running AI extraction pipeline...' },
+  { id: 'COMPILING_PDF',    label: 'Rendering Report',             icon: '📊', desc: 'Building Geojit-style PDF...' },
+  { id: 'COMPLETED',        label: 'Report Ready!',                icon: '✅', desc: 'Download your report below.' },
 ];
 
+const PROVIDER_BADGES = {
+  'Gemini 2.0 Flash':      { bg: '#1a73e8', label: '⚡ Gemini 2.0 Flash' },
+  'Groq Llama 3.1':        { bg: '#f55036', label: '🦙 Groq Llama 3.1' },
+  'OpenAI GPT-4o-mini':    { bg: '#10a37f', label: '🌿 OpenAI GPT-4o' },
+  'Rule-based Engine':     { bg: '#666',    label: '⚙️ Rule-based Engine' },
+};
+
 export default function App() {
-  const [companyName, setCompanyName] = useState('');
+  const [companyName, setCompanyName]   = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
-  const [jobId, setJobId] = useState(null);
-  const [status, setStatus] = useState('IDLE');
-  const [error, setError] = useState(null);
-  const [reportData, setReportData] = useState(null);
-  const [dragActive, setDragActive] = useState(false);
+  const [jobId, setJobId]               = useState(null);
+  const [status, setStatus]             = useState('IDLE');
+  const [error, setError]               = useState(null);
+  const [reportData, setReportData]     = useState(null);
+  const [aiProvider, setAiProvider]     = useState('');
+  const [dragActive, setDragActive]     = useState(false);
+  const [health, setHealth]             = useState(null);
   const fileInputRef = useRef(null);
+
+  // Load health on mount
+  useEffect(() => {
+    axios.get(`${API_BASE}/health`).then(r => setHealth(r.data)).catch(() => {});
+  }, []);
 
   // Poll for status
   useEffect(() => {
@@ -29,23 +43,18 @@ export default function App() {
         try {
           const res = await axios.get(`${API_BASE}/status/${jobId}`);
           setStatus(res.data.status);
-          if (res.data.status === 'COMPLETED') {
-            setReportData(res.data.extracted_data);
-          }
-          if (res.data.status === 'FAILED') {
-            setError(res.data.error || 'Unknown error');
-          }
-        } catch (err) {
-          console.error(err);
-        }
+          if (res.data.extracted_data)  setReportData(res.data.extracted_data);
+          if (res.data.ai_provider)     setAiProvider(res.data.ai_provider);
+          if (res.data.status === 'FAILED') setError(res.data.error || 'Unknown error');
+        } catch { /* ignore */ }
       }, 1500);
     }
     return () => clearInterval(interval);
   }, [jobId, status]);
 
   const handleSubmit = async () => {
-    if (!companyName.trim()) { alert('Please enter a company name.'); return; }
-    if (!selectedFile) { alert('Please select a file.'); return; }
+    if (!companyName.trim()) { alert('Enter a company name.'); return; }
+    if (!selectedFile)        { alert('Select a file.');         return; }
 
     const formData = new FormData();
     formData.append('file', selectedFile);
@@ -55,181 +64,277 @@ export default function App() {
       setStatus('PENDING');
       setError(null);
       setReportData(null);
+      setAiProvider('');
       const res = await axios.post(`${API_BASE}/extract`, formData);
       setJobId(res.data.id);
     } catch (err) {
       setStatus('FAILED');
-      setError(err.message);
+      setError(err.response?.data?.error || err.message);
     }
   };
 
-  const handleDrag = (e) => { e.preventDefault(); e.stopPropagation(); setDragActive(e.type === 'dragenter' || e.type === 'dragover'); };
-  const handleDrop = (e) => { e.preventDefault(); setDragActive(false); if (e.dataTransfer.files?.[0]) setSelectedFile(e.dataTransfer.files[0]); };
+  const handleDrag = useCallback((e) => {
+    e.preventDefault(); e.stopPropagation();
+    setDragActive(e.type === 'dragenter' || e.type === 'dragover');
+  }, []);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault(); setDragActive(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) setSelectedFile(f);
+  }, []);
+
+  const reset = () => { setStatus('IDLE'); setJobId(null); setReportData(null); setSelectedFile(null); setCompanyName(''); setError(null); };
 
   const currentStepIdx = STEPS.findIndex(s => s.id === status);
+  const providerBadge  = PROVIDER_BADGES[aiProvider] || PROVIDER_BADGES['Rule-based Engine'];
+
+  const isIdle      = status === 'IDLE';
+  const isProcessing = !['IDLE', 'COMPLETED', 'FAILED'].includes(status);
+  const isDone      = status === 'COMPLETED' && reportData;
+  const isFailed    = status === 'FAILED';
 
   return (
-    <div className="min-h-screen py-8 px-4">
-      {/* Header */}
-      <div className="max-w-3xl mx-auto text-center mb-10">
-        <div className="inline-flex items-center gap-3 mb-3">
-          <div className="w-12 h-12 rounded-xl flex items-center justify-center text-2xl" style={{background:'#004B87'}}>
-            <span className="text-white">📈</span>
+    <div className="app-root">
+      {/* Background orbs */}
+      <div className="bg-orb orb1" />
+      <div className="bg-orb orb2" />
+      <div className="bg-orb orb3" />
+
+      <div className="container">
+
+        {/* ── Header ─────────────────────────────────── */}
+        <header className="header">
+          <div className="logo-row">
+            <div className="logo-icon">📈</div>
+            <div>
+              <h1 className="brand-title">Bull AI</h1>
+              <p className="brand-sub">Financial Research Report Generator</p>
+            </div>
           </div>
-          <h1 className="text-3xl font-bold" style={{color:'#004B87'}}>
-            Geojit AI Research
-          </h1>
-        </div>
-        <p className="text-gray-500 text-sm max-w-lg mx-auto">
-          Upload a financial context document (PDF, CSV, or TXT) and instantly generate a professional Geojit-style research report.
-        </p>
-      </div>
+          <p className="brand-desc">
+            Upload any financial document — PDF, CSV, or TXT — and instantly generate a
+            professional <strong>Geojit-style 4-page equity research report</strong> with AI.
+          </p>
 
-      {/* Input Form */}
-      {(status === 'IDLE' || status === 'COMPLETED' || status === 'FAILED') && (
-        <div className="max-w-xl mx-auto space-y-5">
-          {/* Company Name */}
-          <div className="glass-panel rounded-xl p-5">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Company Name</label>
-            <input
-              type="text"
-              className="w-full px-4 py-3 rounded-lg border border-gray-200 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-sm"
-              placeholder="e.g. ICICI Bank, Zomato Ltd, Infosys"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-            />
-          </div>
-
-          {/* File Upload */}
-          <div
-            className={`glass-panel rounded-xl p-8 text-center cursor-pointer transition-all border-2 border-dashed ${
-              dragActive ? 'border-blue-500 bg-blue-50/30' : selectedFile ? 'border-green-400 bg-green-50/20' : 'border-gray-300 hover:border-gray-400'
-            }`}
-            onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <input ref={fileInputRef} type="file" accept=".pdf,.csv,.txt" onChange={(e) => setSelectedFile(e.target.files?.[0])} className="hidden" />
-            {selectedFile ? (
-              <div>
-                <div className="text-4xl mb-2">✅</div>
-                <p className="font-semibold text-gray-800">{selectedFile.name}</p>
-                <p className="text-xs text-gray-500 mt-1">{(selectedFile.size / 1024).toFixed(1)} KB • Click to change</p>
-              </div>
-            ) : (
-              <div>
-                <div className="text-4xl mb-2">📂</div>
-                <p className="font-semibold text-gray-700">Drag & drop your context document</p>
-                <p className="text-xs text-gray-400 mt-1">Supports PDF, CSV, and TXT files</p>
-              </div>
-            )}
-          </div>
-
-          {/* Submit Button */}
-          <button
-            onClick={handleSubmit}
-            disabled={!companyName.trim() || !selectedFile}
-            className="w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-lg active:scale-[0.98]"
-            style={{background: !companyName.trim() || !selectedFile ? '#aaa' : '#004B87'}}
-          >
-            🚀 Generate Geojit Research Report
-          </button>
-
-          {/* Error */}
-          {status === 'FAILED' && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-center">
-              <p className="text-red-700 font-semibold">Generation Failed</p>
-              <p className="text-red-500 text-xs mt-1">{error}</p>
+          {/* Provider status bar */}
+          {health && (
+            <div className="provider-bar">
+              <span className={`provider-chip ${health.gemini ? 'active' : 'inactive'}`}>
+                ⚡ Gemini {health.gemini ? 'Ready' : 'No Key'}
+              </span>
+              <span className={`provider-chip ${health.groq ? 'active' : 'inactive'}`}>
+                🦙 Groq {health.groq ? 'Ready' : 'No Key'}
+              </span>
+              <span className={`provider-chip ${health.openai ? 'active' : 'inactive'}`}>
+                🌿 OpenAI {health.openai ? 'Ready' : 'No Key'}
+              </span>
+              <span className="provider-chip active">⚙️ Rule-based Always Ready</span>
             </div>
           )}
-        </div>
-      )}
+        </header>
 
-      {/* Processing Tracker */}
-      {!['IDLE', 'COMPLETED', 'FAILED'].includes(status) && (
-        <div className="max-w-md mx-auto glass-panel rounded-2xl p-8">
-          <h3 className="text-lg font-bold text-gray-800 mb-6 text-center">Processing Document...</h3>
-          <div className="space-y-4">
-            {STEPS.map((step, idx) => {
-              const done = idx < currentStepIdx || status === 'COMPLETED';
-              const active = idx === currentStepIdx && status !== 'COMPLETED';
-              return (
-                <div key={step.id} className={`flex items-center gap-3 transition-all ${done ? 'text-gray-800' : active ? 'text-blue-700' : 'text-gray-300'}`}>
-                  <span className="text-xl w-8 text-center">{done ? '✅' : active ? '⏳' : '○'}</span>
-                  <span className={`text-sm ${active ? 'font-bold' : ''}`}>{step.label}</span>
-                  {active && <span className="ml-auto text-xs text-blue-500 animate-pulse">Processing...</span>}
+        {/* ── Input Form ─────────────────────────────── */}
+        {(isIdle || isFailed) && (
+          <div className="form-card">
+            {/* Company name */}
+            <div className="form-group">
+              <label htmlFor="company-name-input" className="form-label">Company Name</label>
+              <input
+                id="company-name-input"
+                type="text"
+                className="form-input"
+                placeholder="e.g. ICICI Bank, Zomato, JSW Energy"
+                value={companyName}
+                onChange={e => setCompanyName(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+              />
+            </div>
+
+            {/* File dropzone */}
+            <div
+              id="file-dropzone"
+              className={`dropzone ${dragActive ? 'drag-active' : ''} ${selectedFile ? 'has-file' : ''}`}
+              onDragEnter={handleDrag} onDragLeave={handleDrag}
+              onDragOver={handleDrag} onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.csv,.txt"
+                onChange={e => setSelectedFile(e.target.files?.[0])}
+                className="hidden-input"
+              />
+              {selectedFile ? (
+                <div className="file-info">
+                  <div className="file-icon">
+                    {selectedFile.name.endsWith('.pdf') ? '📕' :
+                     selectedFile.name.endsWith('.csv') ? '📊' : '📄'}
+                  </div>
+                  <p className="file-name">{selectedFile.name}</p>
+                  <p className="file-size">{(selectedFile.size / 1024).toFixed(1)} KB · click to change</p>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Results */}
-      {status === 'COMPLETED' && reportData && (
-        <div className="max-w-3xl mx-auto mt-8 space-y-6">
-          {/* Download Card */}
-          <div className="glass-panel rounded-2xl p-8 text-center">
-            <div className="text-5xl mb-4">📊</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-1">{reportData.company_name}</h2>
-            <p className="text-gray-500 text-sm mb-6">{reportData.sector} • {reportData.report_date}</p>
-            <a
-              href={`${API_BASE}/download/${jobId}`}
-              download
-              className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-white font-semibold text-sm transition-all hover:shadow-xl active:scale-95"
-              style={{background:'#004B87'}}
-            >
-              ⬇️ Download Geojit-Style PDF Report
-            </a>
-          </div>
-
-          {/* Preview Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Highlights */}
-            <div className="glass-panel rounded-xl p-5">
-              <h3 className="font-bold text-gray-800 mb-3 text-sm">Key Highlights</h3>
-              <ul className="space-y-2">
-                {reportData.highlights?.slice(0, 5).map((h, i) => (
-                  <li key={i} className="text-xs text-gray-600 flex gap-2"><span>•</span><span>{h}</span></li>
-                ))}
-              </ul>
+              ) : (
+                <div className="drop-hint">
+                  <div className="drop-icon">📂</div>
+                  <p className="drop-title">Drag & drop your document</p>
+                  <p className="drop-sub">PDF (recommended) · CSV · TXT</p>
+                  <div className="drop-badges">
+                    <span className="badge">Geojit-style template</span>
+                    <span className="badge">4-page report</span>
+                    <span className="badge">AI-powered charts</span>
+                  </div>
+                </div>
+              )}
             </div>
-            {/* Financials Preview */}
-            <div className="glass-panel rounded-xl p-5">
-              <h3 className="font-bold text-gray-800 mb-3 text-sm">Financial Snapshot</h3>
-              {reportData.financials?.income_statement?.length > 0 ? (
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-gray-500 border-b">
-                      <th className="text-left py-1">Metric</th>
-                      <th className="text-right py-1">FY25A</th>
-                      <th className="text-right py-1">FY26E</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reportData.financials.income_statement.slice(0, 5).map((r, i) => (
-                      <tr key={i} className="border-b border-gray-100">
-                        <td className="py-1.5 text-gray-700">{r.metric}</td>
-                        <td className="py-1.5 text-right text-gray-600">{r.fy25a}</td>
-                        <td className="py-1.5 text-right font-medium" style={{color:'#004B87'}}>{r.fy26e}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : <p className="text-xs text-gray-400">No income statement data extracted.</p>}
-            </div>
-          </div>
 
-          {/* Generate Another */}
-          <div className="text-center">
+            {isFailed && (
+              <div className="error-box">
+                <p className="error-title">⚠ Generation Failed</p>
+                <p className="error-msg">{error}</p>
+              </div>
+            )}
+
             <button
-              onClick={() => { setStatus('IDLE'); setJobId(null); setReportData(null); setSelectedFile(null); setCompanyName(''); }}
-              className="text-sm text-blue-600 hover:underline"
+              id="generate-btn"
+              className="generate-btn"
+              onClick={handleSubmit}
+              disabled={!companyName.trim() || !selectedFile}
             >
-              ← Generate another report
+              🚀 Generate Geojit Research Report
             </button>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* ── Processing Tracker ─────────────────────── */}
+        {isProcessing && (
+          <div className="tracker-card">
+            <div className="tracker-header">
+              <div className="spinner" />
+              <span>Processing <strong>{companyName}</strong>...</span>
+            </div>
+            <div className="steps">
+              {STEPS.map((step, idx) => {
+                const done   = idx < currentStepIdx;
+                const active = idx === currentStepIdx;
+                return (
+                  <div key={step.id} className={`step ${done ? 'done' : active ? 'active' : 'pending'}`}>
+                    <div className="step-icon">
+                      {done ? '✅' : active ? <span className="pulse-dot" /> : '○'}
+                    </div>
+                    <div className="step-text">
+                      <span className="step-label">{step.label}</span>
+                      {active && <span className="step-desc">{step.desc}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── Result ─────────────────────────────────── */}
+        {isDone && (
+          <div className="result-wrapper">
+            {/* Download hero */}
+            <div className="result-hero">
+              <div className="result-icon">📊</div>
+              <h2 className="result-company">{reportData.company_name}</h2>
+              <p className="result-meta">{reportData.sector} · {reportData.report_date}</p>
+
+              {aiProvider && (
+                <div className="ai-badge" style={{ background: providerBadge.bg }}>
+                  {providerBadge.label}
+                </div>
+              )}
+
+              <a
+                id="download-btn"
+                href={`${API_BASE}/download/${jobId}`}
+                download
+                className="download-btn"
+              >
+                ⬇️ Download PDF Research Report
+              </a>
+              <button className="reset-link" onClick={reset}>← Generate another report</button>
+            </div>
+
+            {/* Data preview */}
+            <div className="preview-grid">
+              {/* Valuation snapshot */}
+              {reportData.valuation && (
+                <div className="preview-card">
+                  <h3 className="preview-title">Valuation</h3>
+                  <div className="val-grid">
+                    <div className="val-item">
+                      <span className="val-label">Rating</span>
+                      <span className={`rating-pill rating-${(reportData.valuation.rating || 'hold').toLowerCase()}`}>
+                        {reportData.valuation.rating || '—'}
+                      </span>
+                    </div>
+                    <div className="val-item">
+                      <span className="val-label">Target</span>
+                      <span className="val-value">₹{reportData.valuation.target || '—'}</span>
+                    </div>
+                    <div className="val-item">
+                      <span className="val-label">CMP</span>
+                      <span className="val-value">₹{reportData.valuation.cmp || '—'}</span>
+                    </div>
+                    <div className="val-item">
+                      <span className="val-label">Return</span>
+                      <span className="val-value upside">{reportData.valuation.upside || '—'}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Key highlights */}
+              <div className="preview-card">
+                <h3 className="preview-title">Key Highlights</h3>
+                <ul className="highlights-list">
+                  {(reportData.highlights || []).slice(0, 5).map((h, i) => (
+                    <li key={i}><span className="bullet">•</span>{h}</li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Income statement */}
+              <div className="preview-card span-2">
+                <h3 className="preview-title">Financial Snapshot (Annual)</h3>
+                {reportData.financials?.income_statement?.length > 0 ? (
+                  <table className="fin-table">
+                    <thead>
+                      <tr>
+                        <th>Metric</th>
+                        <th>FY23A</th>
+                        <th>FY24A</th>
+                        <th>FY25A</th>
+                        <th>FY26E</th>
+                        <th>FY27E</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportData.financials.income_statement.slice(0, 8).map((r, i) => (
+                        <tr key={i}>
+                          <td className="metric-col">{r.metric}</td>
+                          <td>{r.fy23a}</td>
+                          <td>{r.fy24a}</td>
+                          <td>{r.fy25a}</td>
+                          <td className="highlight-col">{r.fy26e}</td>
+                          <td className="highlight-col">{r.fy27e}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="no-data">Upload a richer document with Gemini/Groq API key for detailed financials.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
