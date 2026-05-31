@@ -1,0 +1,39 @@
+# Bytecode and cache directories
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+venv/
+ENV/
+env/
+.venv/
+
+# Dependencies
+node_modules/
+dist/
+dist-ssr/
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+
+# Output files and charts
+output/
+temp_charts/
+*.pdf
