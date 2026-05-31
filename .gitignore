@@ -22,6 +22,8 @@ env/
 node_modules/
 dist/
 dist-ssr/
+.vite/
+frontend/.vite/
 
 # IDEs and Editors
 .vscode/
