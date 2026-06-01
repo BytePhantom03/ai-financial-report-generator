@@ -421,5 +421,5 @@ valuation, estimates (list), financials (income_statement, balance_sheet, cash_f
   as list of {{metric, fy23a, fy24a, fy25a, fy26e, fy27e}}),
 recommendation_history (list of {{Date, Rating, Target}})
 
-Document (first 12000 chars):
-{text[:12000]}"""
+Document text:
+{text[:200000]}"""

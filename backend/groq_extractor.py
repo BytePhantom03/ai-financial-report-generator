@@ -85,12 +85,12 @@ def extract_with_groq(company_name: str, document_text: str) -> GeojitReportData
 
     prompt = _PROMPT_TEMPLATE.format(
         company_name=company_name,
-        text=document_text[:10000],
+        text=document_text[:200000],  # Increased from 10k to 200k to include all pages + OCR data
     )
 
-    print(f"Extracting with Groq Llama 3.1 70B for {company_name}...")
+    print(f"Extracting with Groq Llama 3.3 70B for {company_name}...")
     response = client.chat.completions.create(
-        model="llama-3.1-70b-versatile",
+        model="llama-3.3-70b-versatile",
         messages=[
             {"role": "system", "content": "You are a financial data extraction engine. Return only valid JSON."},
             {"role": "user",   "content": prompt},
